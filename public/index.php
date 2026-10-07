@@ -5,14 +5,19 @@ declare(strict_types=1);
 require_once __DIR__ . '/../app/Config.php';
 require_once __DIR__ . '/../app/Database.php';
 require_once __DIR__ . '/../app/Bootstrap.php';
+require_once __DIR__ . '/../app/Bootstrap/SchemaBoot.php';
 require_once __DIR__ . '/../app/Models/User.php';
 require_once __DIR__ . '/../app/Models/Campaign.php';
 require_once __DIR__ . '/../app/Models/Job.php';
+require_once __DIR__ . '/../app/Models/Role.php';
+require_once __DIR__ . '/../app/Models/Token.php';
 require_once __DIR__ . '/../app/Services/AuthService.php';
 require_once __DIR__ . '/../app/Services/CampaignService.php';
 require_once __DIR__ . '/../app/Services/JobService.php';
 require_once __DIR__ . '/../app/Services/SessionService.php';
 require_once __DIR__ . '/../app/Services/WorkerService.php';
+require_once __DIR__ . '/../app/Services/BlueskyTokenService.php';
+require_once __DIR__ . '/../app/Services/RoleService.php';
 require_once __DIR__ . '/../app/Services/EnvironmentValidator.php';
 require_once __DIR__ . '/../app/Controllers/AuthController.php';
 require_once __DIR__ . '/../app/Controllers/CampaignController.php';
@@ -20,10 +25,11 @@ require_once __DIR__ . '/../app/Controllers/JobController.php';
 require_once __DIR__ . '/../app/Http/Router.php';
 
 use App\Bootstrap;
+use App\Bootstrap\SchemaBoot;
 use App\Config;
 use App\Database;
 use App\Http\Router;
-use App\Services\EnvironmentValidator;
+use App\Services\RoleService;
 use App\Services\SessionService;
 use App\Services\WorkerService;
 
@@ -31,11 +37,12 @@ $config = Config::load(__DIR__ . '/..');
 $db = new Database($config);
 $pdo = $db->connection();
 Bootstrap::ensureSchema($pdo);
-
+SchemaBoot::ensureRoleSchema($pdo);
+$roleService = new RoleService($pdo);
+$roleService->ensure();
 $session = new SessionService();
 $session->start();
 
-$validator = EnvironmentValidator::validate($config);
 $worker = new WorkerService($pdo);
 $worker->runBatch(5);
 
@@ -106,8 +113,7 @@ try {
       <span class="badge">Production foundation</span>
       <h1>Bluesky Production Engine</h1>
       <p class="status">{$sessionStatus}</p>
-      <p>Environment validation: <strong>{$validator['ok'] ? 'pass' : 'issues detected'}</strong></p>
-      <p>Worker queue: <strong>background processing enabled</strong></p>
+      <p>Role system enabled with admin/editor/viewer permissions.</p>
     </div>
 
     <div class="grid">
