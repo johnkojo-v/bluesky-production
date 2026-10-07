@@ -1,0 +1,16 @@
+{
+  "name": "johnkojo-v/bluesky-production",
+  "description": "Production-ready version of the BlueSky mock engine",
+  "type": "project",
+  "require": {
+    "php": ">=8.2"
+  },
+  "autoload": {
+    "psr-4": {
+      "App\\": "app/"
+    }
+  },
+  "scripts": {
+    "test": "php -l public/index.php && php -l app/*.php"
+  }
+}
