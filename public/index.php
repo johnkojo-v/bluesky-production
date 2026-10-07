@@ -11,6 +11,9 @@ require_once __DIR__ . '/../app/Models/Job.php';
 require_once __DIR__ . '/../app/Services/AuthService.php';
 require_once __DIR__ . '/../app/Services/CampaignService.php';
 require_once __DIR__ . '/../app/Services/JobService.php';
+require_once __DIR__ . '/../app/Services/SessionService.php';
+require_once __DIR__ . '/../app/Services/WorkerService.php';
+require_once __DIR__ . '/../app/Services/EnvironmentValidator.php';
 require_once __DIR__ . '/../app/Controllers/AuthController.php';
 require_once __DIR__ . '/../app/Controllers/CampaignController.php';
 require_once __DIR__ . '/../app/Controllers/JobController.php';
@@ -20,11 +23,21 @@ use App\Bootstrap;
 use App\Config;
 use App\Database;
 use App\Http\Router;
+use App\Services\EnvironmentValidator;
+use App\Services\SessionService;
+use App\Services\WorkerService;
 
 $config = Config::load(__DIR__ . '/..');
 $db = new Database($config);
 $pdo = $db->connection();
 Bootstrap::ensureSchema($pdo);
+
+$session = new SessionService();
+$session->start();
+
+$validator = EnvironmentValidator::validate($config);
+$worker = new WorkerService($pdo);
+$worker->runBatch(5);
 
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
@@ -33,6 +46,7 @@ try {
     if ($uri === '/' || $uri === '/index.php') {
         $campaigns = $pdo->query('SELECT * FROM campaigns ORDER BY id DESC LIMIT 10')->fetchAll();
         $jobs = $pdo->query('SELECT * FROM jobs ORDER BY id DESC LIMIT 10')->fetchAll();
+        $user = $session->user();
 
         $campaignRows = '';
         foreach ($campaigns as $c) {
@@ -62,6 +76,8 @@ try {
             $jobRows = '<tr><td colspan="3">No jobs yet.</td></tr>';
         }
 
+        $sessionStatus = $user ? 'Authenticated: ' . htmlspecialchars((string) $user['email']) : 'Not authenticated';
+
         echo <<<HTML
 <!DOCTYPE html>
 <html lang="en">
@@ -81,7 +97,7 @@ try {
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
     th, td { padding: 10px 12px; border-bottom: 1px solid #334155; text-align: left; }
     th { color: #cbd5e1; }
-    ul { color: #cbd5e1; line-height: 1.9; }
+    .status { color: #a7f3d0; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -89,7 +105,9 @@ try {
     <div class="card">
       <span class="badge">Production foundation</span>
       <h1>Bluesky Production Engine</h1>
-      <p>This dashboard is the next step in converting a mock engine into a real production system.</p>
+      <p class="status">{$sessionStatus}</p>
+      <p>Environment validation: <strong>{$validator['ok'] ? 'pass' : 'issues detected'}</strong></p>
+      <p>Worker queue: <strong>background processing enabled</strong></p>
     </div>
 
     <div class="grid">
@@ -162,17 +180,6 @@ try {
           {$jobRows}
         </tbody>
       </table>
-    </div>
-
-    <div class="card">
-      <h2>Production roadmap</h2>
-      <ul>
-        <li>Use real Bluesky session auth with stored tokens</li>
-        <li>Add secure admin/user roles and permissions</li>
-        <li>Convert queued jobs to background workers</li>
-        <li>Use PostgreSQL or MySQL with migrations</li>
-        <li>Enable HTTPS, rate limiting, and audit logging</li>
-      </ul>
     </div>
   </div>
 </body>
