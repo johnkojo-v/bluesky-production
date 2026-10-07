@@ -2,45 +2,47 @@
 
 declare(strict_types=1);
 
-namespace App;
+namespace App\Services;
 
-final class Config
+final class AuthService
 {
-    private static ?array $config = null;
+    public function __construct(private \PDO $pdo) {}
 
-    public static function load(string $basePath): array
+    public function loginOrRegister(string $email, string $password): array
     {
-        if (self::$config !== null) {
-            return self::$config;
+        $email = trim($email);
+        $password = (string) $password;
+
+        if ($email === '' || $password === '') {
+            throw new \InvalidArgumentException('Email and password are required.');
         }
 
-        $envFile = $basePath . '/.env';
-        if (is_file($envFile)) {
-            $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            foreach ($lines as $line) {
-                if (str_starts_with(trim($line), '#')) {
-                    continue;
-                }
-
-                [$key, $value] = array_pad(explode('=', $line, 2), 2, '');
-                $_ENV[trim($key)] = trim($value, " \n\r\t\v\0\"");
-            }
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new \InvalidArgumentException('A valid email address is required.');
         }
 
-        self::$config = [
-            'app_name' => getenv('APP_NAME') ?: 'Bluesky Production Engine',
-            'app_env' => getenv('APP_ENV') ?: 'production',
-            'app_debug' => filter_var(getenv('APP_DEBUG') ?: false, FILTER_VALIDATE_BOOLEAN),
-            'app_url' => getenv('APP_URL') ?: 'http://localhost',
-            'db_connection' => getenv('DB_CONNECTION') ?: 'sqlite',
-            'db_path' => getenv('DB_PATH') ?: $basePath . '/storage/app.sqlite',
-            'bluesky_enabled' => filter_var(getenv('BLUESKY_ENABLED') ?: true, FILTER_VALIDATE_BOOLEAN),
-            'bluesky_pds_url' => getenv('BLUESKY_PDS_URL') ?: 'https://bsky.social',
-            'bluesky_api_url' => getenv('BLUESKY_API_URL') ?: 'https://bsky.social',
-            'jwt_secret' => getenv('JWT_SECRET') ?: 'replace-this-secret',
-            'session_lifetime' => (int) (getenv('SESSION_LIFETIME') ?: 3600),
+        $user = \App\Models\User::findByEmail($this->pdo, $email);
+
+        if (!$user) {
+            $hash = password_hash($password, PASSWORD_DEFAULT);
+            $user = \App\Models\User::create($this->pdo, $email, $hash, 'user');
+            RoleManager::setRole($this->pdo, (int) $user['id'], RoleManager::resolveDefaultRole($email));
+        }
+
+        $resolvedRole = (string) ($user['role'] ?? RoleManager::resolveDefaultRole($email));
+        if ($resolvedRole === 'user') {
+            RoleManager::setRole($this->pdo, (int) ($user['id'] ?? 0), RoleManager::resolveDefaultRole($email));
+            $resolvedRole = RoleManager::resolveDefaultRole($email);
+        }
+
+        if (!password_verify($password, (string) ($user['password_hash'] ?? '')) && isset($user['password_hash'])) {
+            throw new \InvalidArgumentException('Invalid credentials.');
+        }
+
+        return [
+            'id' => (int) ($user['id'] ?? 0),
+            'email' => (string) ($user['email'] ?? $email),
+            'role' => $resolvedRole,
         ];
-
-        return self::$config;
     }
 }
