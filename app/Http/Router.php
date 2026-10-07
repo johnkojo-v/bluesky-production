@@ -6,6 +6,7 @@ namespace App\Http;
 
 use App\Controllers\AuthController;
 use App\Controllers\CampaignController;
+use App\Controllers\JobController;
 use PDO;
 
 final class Router
@@ -50,8 +51,29 @@ final class Router
             }
         }
 
+        if ($method === 'POST' && $uri === '/api/jobs') {
+            $payload = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+            try {
+                $controller = new JobController($pdo);
+                header('Content-Type: application/json');
+                echo json_encode($controller->create($payload));
+                return;
+            } catch (\Throwable $e) {
+                http_response_code(422);
+                echo json_encode(['error' => $e->getMessage()]);
+                return;
+            }
+        }
+
         if ($method === 'GET' && $uri === '/api/campaigns') {
             $controller = new CampaignController($pdo);
+            header('Content-Type: application/json');
+            echo json_encode($controller->list());
+            return;
+        }
+
+        if ($method === 'GET' && $uri === '/api/jobs') {
+            $controller = new JobController($pdo);
             header('Content-Type: application/json');
             echo json_encode($controller->list());
             return;
