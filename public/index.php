@@ -22,11 +22,13 @@ require_once __DIR__ . '/../app/Services/TokenEncryption.php';
 require_once __DIR__ . '/../app/Services/BlueskyTokenService.php';
 require_once __DIR__ . '/../app/Services/BlueskyAuthService.php';
 require_once __DIR__ . '/../app/Services/BlueskyRealAuthService.php';
+require_once __DIR__ . '/../app/Services/BlueskySessionManager.php';
 require_once __DIR__ . '/../app/Services/ProductionWorker.php';
 require_once __DIR__ . '/../app/Services/EnvironmentValidator.php';
 require_once __DIR__ . '/../app/Controllers/AuthController.php';
 require_once __DIR__ . '/../app/Controllers/CampaignController.php';
 require_once __DIR__ . '/../app/Controllers/JobController.php';
+require_once __DIR__ . '/../app/Controllers/BlueskyController.php';
 require_once __DIR__ . '/../app/Http/Router.php';
 
 use App\Bootstrap;
@@ -34,7 +36,7 @@ use App\Bootstrap\SchemaBoot;
 use App\Config;
 use App\Database;
 use App\Http\Router;
-use App\Services\BlueskyRealAuthService;
+use App\Services\BlueskySessionManager;
 use App\Services\PermissionService;
 use App\Services\ProductionWorker;
 use App\Services\SessionService;
@@ -51,10 +53,14 @@ $permissionService->installDefaults();
 $session = new SessionService();
 $session->start();
 
-$jwtSecret = getenv('JWT_SECRET') ?: 'development-secret';
-$blueskyAuth = new BlueskyRealAuthService($pdo, $jwtSecret, getenv('BLUESKY_PDS_URL') ?: 'https://bsky.social');
-$worker = new ProductionWorker($pdo, $blueskyAuth);
-$worker->processQueuedJobs(5);
+$jwtSecret = getenv('JWT_SECRET') ?: 'development-secret-change-in-production';
+$pdsUrl = getenv('BLUESKY_PDS_URL') ?: 'https://bsky.social';
+$bluesky = new BlueskySessionManager($pdsUrl, $pdsUrl);
+
+if (getenv('APP_ENV') === 'production') {
+    $worker = new ProductionWorker($pdo, new \App\Services\BlueskyRealAuthService($pdo, $jwtSecret, $pdsUrl));
+    $worker->processQueuedJobs(5);
+}
 
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
@@ -123,7 +129,7 @@ try {
       <span class="badge">Production-ready</span>
       <h1>Bluesky Production Engine</h1>
       <p class="status">{$sessionStatus}</p>
-      <p>Real Bluesky token handling, permission enforcement, and worker processing are now in place.</p>
+      <p>Real Bluesky session/auth flow is integrated. Campaigns and jobs are queued for processing.</p>
     </div>
 
     <div class="grid">
@@ -139,6 +145,17 @@ try {
       </div>
 
       <div class="card">
+        <h2>Bluesky auth</h2>
+        <form action="/api/bluesky/authenticate" method="post">
+          <label>Bluesky handle</label>
+          <input type="text" name="handle" placeholder="user.bsky.social" required />
+          <label>App password</label>
+          <input type="password" name="password" placeholder="xxxx-xxxx-xxxx-xxxx" required />
+          <button type="submit">Authenticate with Bluesky</button>
+        </form>
+      </div>
+
+      <div class="card">
         <h2>Create campaign</h2>
         <form action="/api/campaigns" method="post">
           <label>Campaign name</label>
@@ -146,22 +163,6 @@ try {
           <label>Topic</label>
           <input type="text" name="topic" placeholder="AI growth" />
           <button type="submit">Create campaign</button>
-        </form>
-      </div>
-
-      <div class="card">
-        <h2>Queue job</h2>
-        <form action="/api/jobs" method="post">
-          <label>Campaign ID</label>
-          <input type="number" name="campaign_id" placeholder="1" min="1" required />
-          <label>Action</label>
-          <select name="action">
-            <option value="publish_post">Publish Post</option>
-            <option value="like_post">Like Post</option>
-            <option value="follow_account">Follow Account</option>
-            <option value="repost_content">Repost Content</option>
-          </select>
-          <button type="submit">Queue job</button>
         </form>
       </div>
     </div>
@@ -204,7 +205,7 @@ HTML;
         exit;
     }
 
-    Router::dispatch($uri, $method, $pdo);
+    Router::dispatch($uri, $method, $pdo, $jwtSecret, $bluesky);
 } catch (\Throwable $e) {
     http_response_code(500);
     header('Content-Type: application/json');

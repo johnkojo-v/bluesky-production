@@ -5,16 +5,19 @@ declare(strict_types=1);
 namespace App\Http;
 
 use App\Controllers\AuthController;
+use App\Controllers\BlueskyController;
 use App\Controllers\CampaignController;
 use App\Controllers\JobController;
 use App\Services\AuthGuard;
+use App\Services\BlueskySessionManager;
 use App\Services\PermissionService;
 use App\Services\SessionService;
+use App\Services\TokenEncryption;
 use PDO;
 
 final class Router
 {
-    public static function dispatch(string $uri, string $method, PDO $pdo): void
+    public static function dispatch(string $uri, string $method, PDO $pdo, string $jwtSecret, BlueskySessionManager $bluesky): void
     {
         $session = new SessionService();
         $session->start();
@@ -36,6 +39,21 @@ final class Router
                 return;
             } catch (\Throwable $e) {
                 http_response_code(422);
+                echo json_encode(['error' => $e->getMessage()]);
+                return;
+            }
+        }
+
+        if ($method === 'POST' && $uri === '/api/bluesky/authenticate') {
+            $payload = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+            try {
+                $controller = new BlueskyController($pdo, $session, $bluesky, $jwtSecret);
+                $result = $controller->authenticate($payload);
+                header('Content-Type: application/json');
+                echo json_encode(['status' => 'success', 'bluesky' => $result]);
+                return;
+            } catch (\Throwable $e) {
+                http_response_code(401);
                 echo json_encode(['error' => $e->getMessage()]);
                 return;
             }
