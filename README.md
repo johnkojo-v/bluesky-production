@@ -27,6 +27,7 @@ require_once __DIR__ . '/../app/Services/BlueskyRealAuthService.php';
 require_once __DIR__ . '/../app/Services/BlueskySessionManager.php';
 require_once __DIR__ . '/../app/Services/ProductionWorker.php';
 require_once __DIR__ . '/../app/Services/EnvironmentValidator.php';
+require_once __DIR__ . '/../app/Services/SecurityHardening.php';
 require_once __DIR__ . '/../app/Controllers/AuthController.php';
 require_once __DIR__ . '/../app/Controllers/CampaignController.php';
 require_once __DIR__ . '/../app/Controllers/JobController.php';
@@ -42,9 +43,12 @@ use App\Http\Router;
 use App\Services\BlueskySessionManager;
 use App\Services\PermissionService;
 use App\Services\ProductionWorker;
+use App\Services\SecurityHardening;
 use App\Services\SessionService;
 
 $config = Config::load(__DIR__ . '/..');
+SecurityHardening::enforceProductionDefaults();
+
 $db = new Database($config);
 $pdo = $db->connection();
 DatabaseMigrator::run($pdo);
@@ -133,7 +137,7 @@ try {
       <span class="badge">Production-ready</span>
       <h1>Bluesky Production Engine</h1>
       <p class="status">{$sessionStatus}</p>
-      <p>Production migration and role enforcement are active. PostgreSQL/MySQL compatibility and permission scopes are in place.</p>
+      <p>Security defaults and deployment guards are active. HTTPS and production secrets are now enforced during startup.</p>
     </div>
 
     <div class="grid">
