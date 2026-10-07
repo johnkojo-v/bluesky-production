@@ -5,115 +5,80 @@ declare(strict_types=1);
 require_once __DIR__ . '/../app/Config.php';
 require_once __DIR__ . '/../app/Database.php';
 require_once __DIR__ . '/../app/Bootstrap.php';
+require_once __DIR__ . '/../app/Models/User.php';
+require_once __DIR__ . '/../app/Models/Campaign.php';
+require_once __DIR__ . '/../app/Services/AuthService.php';
 
 use App\Bootstrap;
 use App\Config;
 use App\Database;
+use App\Models\Campaign;
+use App\Services\AuthService;
 
 $config = Config::load(__DIR__ . '/..');
 $db = new Database($config);
 $pdo = $db->connection();
 Bootstrap::ensureSchema($pdo);
 
-$path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
+$uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
-if ($path === '/health') {
+if ($uri === '/health') {
     header('Content-Type: application/json');
     echo json_encode([
         'status' => 'ok',
         'app' => $config['app_name'],
         'env' => $config['app_env'],
-        'db_connection' => $config['db_connection'],
         'bluesky_enabled' => $config['bluesky_enabled'],
         'timestamp' => gmdate('c'),
     ]);
     exit;
 }
 
-if ($method === 'POST' && $path === '/api/auth/login') {
-    $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
-    $email = trim((string) ($input['email'] ?? ''));
-    $password = (string) ($input['password'] ?? '');
+if ($method === 'POST' && $uri === '/api/auth/login') {
+    $payload = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+    $email = trim((string) ($payload['email'] ?? ''));
+    $password = (string) ($payload['password'] ?? '');
 
-    if ($email === '' || $password === '') {
+    try {
+        $auth = new AuthService($pdo);
+        $user = $auth->loginOrRegister($email, $password);
+
+        header('Content-Type: application/json');
+        echo json_encode(['status' => 'success', 'user' => $user]);
+        exit;
+    } catch (\InvalidArgumentException $e) {
         http_response_code(422);
-        echo json_encode(['error' => 'email and password are required']);
+        echo json_encode(['error' => $e->getMessage()]);
         exit;
     }
-
-    $stmt = $pdo->prepare('SELECT * FROM users WHERE email = :email LIMIT 1');
-    $stmt->execute([':email' => $email]);
-    $user = $stmt->fetch();
-
-    if (!$user) {
-        $hash = password_hash($password, PASSWORD_DEFAULT);
-        $insert = $pdo->prepare('INSERT INTO users (email, password_hash, role) VALUES (:email, :password_hash, :role)');
-        $insert->execute([
-            ':email' => $email,
-            ':password_hash' => $hash,
-            ':role' => 'user',
-        ]);
-
-        $stmt = $pdo->prepare('SELECT * FROM users WHERE email = :email LIMIT 1');
-        $stmt->execute([':email' => $email]);
-        $user = $stmt->fetch();
-    }
-
-    if (!password_verify($password, (string) ($user['password_hash'] ?? ''))) {
-        http_response_code(401);
-        echo json_encode(['error' => 'invalid credentials']);
-        exit;
-    }
-
-    header('Content-Type: application/json');
-    echo json_encode([
-        'status' => 'success',
-        'user' => [
-            'id' => (int) $user['id'],
-            'email' => $user['email'],
-            'role' => $user['role'],
-        ],
-    ]);
-    exit;
 }
 
-if ($method === 'POST' && $path === '/api/campaigns') {
-    $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
-    $name = trim((string) ($input['name'] ?? ''));
-    $topic = trim((string) ($input['topic'] ?? ''));
+if ($method === 'POST' && $uri === '/api/campaigns') {
+    $payload = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+    $name = trim((string) ($payload['name'] ?? ''));
+    $topic = trim((string) ($payload['topic'] ?? ''));
 
-    if ($name === '') {
+    try {
+        $campaign = Campaign::create($pdo, 1, $name, $topic);
+
+        header('Content-Type: application/json');
+        echo json_encode(['status' => 'created', 'campaign' => $campaign]);
+        exit;
+    } catch (\Throwable $e) {
         http_response_code(422);
-        echo json_encode(['error' => 'campaign name is required']);
+        echo json_encode(['error' => $e->getMessage()]);
         exit;
     }
+}
 
-    $stmt = $pdo->prepare('INSERT INTO campaigns (user_id, name, topic, status, metrics) VALUES (:user_id, :name, :topic, :status, :metrics)');
-    $stmt->execute([
-        ':user_id' => 1,
-        ':name' => $name,
-        ':topic' => $topic,
-        ':status' => 'draft',
-        ':metrics' => json_encode(['engagement' => 0, 'reach' => 0]),
-    ]);
-
+if ($method === 'GET' && $uri === '/api/campaigns') {
     header('Content-Type: application/json');
-    echo json_encode([
-        'status' => 'created',
-        'campaign' => ['name' => $name, 'topic' => $topic],
-    ]);
+    echo json_encode(['campaigns' => Campaign::listRecent($pdo, 20)]);
     exit;
 }
 
-if ($method === 'GET' && $path === '/api/campaigns') {
-    header('Content-Type: application/json');
-    $rows = $pdo->query('SELECT * FROM campaigns ORDER BY id DESC LIMIT 20')->fetchAll();
-    echo json_encode(['campaigns' => $rows]);
-    exit;
-}
-
-$html = <<<HTML
+$html = <<<'HTML'
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -121,109 +86,79 @@ $html = <<<HTML
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Bluesky Production Engine</title>
   <style>
-    :root {
-      --bg: #0f172a;
-      --panel: #111827;
-      --panel-2: #1f2937;
-      --line: #374151;
-      --text: #e5e7eb;
-      --muted: #94a3b8;
-      --primary: #2563eb;
-      --success: #16a34a;
-    }
-    * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: linear-gradient(135deg, #020817, #0f172a 60%, #111827);
-      color: var(--text);
       font-family: Arial, sans-serif;
-      padding: 48px 20px;
+      background: #020817;
+      color: #e2e8f0;
+      padding: 32px 18px;
     }
-    .container {
-      max-width: 980px;
-      margin: 0 auto;
-    }
+    .container { max-width: 1000px; margin: 0 auto; }
     .card {
-      background: rgba(17, 24, 39, 0.9);
-      border: 1px solid var(--line);
+      background: #111827;
+      border: 1px solid #334155;
       border-radius: 16px;
       padding: 24px;
-      margin-bottom: 24px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      margin-bottom: 20px;
     }
     .badge {
       display: inline-block;
-      background: var(--success);
-      color: white;
+      padding: 5px 12px;
       border-radius: 999px;
-      padding: 6px 12px;
-      font-weight: 700;
+      background: #16a34a;
+      color: white;
       font-size: 12px;
-      letter-spacing: 0.04em;
+      font-weight: bold;
+      letter-spacing: 0.05em;
       text-transform: uppercase;
     }
-    h1, h2 { margin-top: 0; }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 20px;
-    }
-    form {
-      display: grid;
-      gap: 12px;
-    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+    label { display: block; margin-bottom: 8px; color: #cbd5e1; }
     input, button {
       width: 100%;
       padding: 12px 14px;
       border-radius: 10px;
-      border: 1px solid var(--line);
-      font-size: 14px;
-    }
-    input {
-      background: rgba(15, 23, 42, 0.9);
-      color: var(--text);
+      border: 1px solid #475569;
+      background: #0f172a;
+      color: #f8fafc;
+      margin-bottom: 12px;
     }
     button {
-      background: var(--primary);
-      color: white;
+      background: #2563eb;
       border: none;
-      font-weight: 700;
       cursor: pointer;
+      font-weight: 700;
     }
-    ul {
-      margin: 0;
-      padding-left: 18px;
-      color: var(--muted);
-      line-height: 1.8;
-    }
-    .small {
-      color: var(--muted);
-    }
+    ul { color: #cbd5e1; line-height: 1.8; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="card">
-      <span class="badge">Production-ready foundation</span>
+      <span class="badge">Production foundation</span>
       <h1>Bluesky Production Engine</h1>
-      <p class="small">App: <strong>{$config['app_name']}</strong> | Environment: <strong>{$config['app_env']}</strong> | Bluesky: <strong>{$config['bluesky_enabled'] ? 'enabled' : 'disabled'}</strong></p>
+      <p>Secure configuration + database-backed campaign foundation for the mock system.</p>
     </div>
 
     <div class="grid">
       <div class="card">
-        <h2>Login demo</h2>
+        <h2>Login API</h2>
         <form action="/api/auth/login" method="post">
+          <label>Email</label>
           <input type="email" name="email" placeholder="user@example.com" required />
+          <label>Password</label>
           <input type="password" name="password" placeholder="Password" required />
-          <button type="submit">Create or login user</button>
+          <button type="submit">Login / Create user</button>
         </form>
       </div>
 
       <div class="card">
-        <h2>Campaign demo</h2>
+        <h2>Create Campaign</h2>
         <form action="/api/campaigns" method="post">
-          <input type="text" name="name" placeholder="Campaign name" required />
-          <input type="text" name="topic" placeholder="Campaign topic" />
+          <label>Campaign name</label>
+          <input type="text" name="name" placeholder="Summer launch" required />
+          <label>Topic</label>
+          <input type="text" name="topic" placeholder="AI tools" />
           <button type="submit">Create campaign</button>
         </form>
       </div>
@@ -232,11 +167,11 @@ $html = <<<HTML
     <div class="card">
       <h2>Production checklist</h2>
       <ul>
-        <li>Use a real database instead of JSON state</li>
-        <li>Store credentials and tokens in environment variables</li>
-        <li>Add real Bluesky authentication and post actions</li>
-        <li>Introduce queue workers for scheduled campaigns</li>
-        <li>Use HTTPS, rate limiting, and audit logging in deployment</li>
+        <li>Environment-based configuration is enabled</li>
+        <li>SQLite-ready schema has been created</li>
+        <li>Campaigns are now stored in a database</li>
+        <li>Auth layer supports login and auto-registration</li>
+        <li>Bluesky API service is scaffolded for real integration</li>
       </ul>
     </div>
   </div>
