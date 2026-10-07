@@ -1,46 +1,46 @@
 # Bluesky Production Engine
 
-A production-ready PHP application that upgrades the mock educational simulation into a real, secure, and deployable service.
+A production-focused PHP application built from the existing mock Bluesky engine.
 
-## What this project includes
+## Current status
 
-- secure configuration via `.env`
-- database-backed persistence using PDO
-- Bluesky API integration scaffold
-- health check endpoint
-- basic auth flow and campaign endpoints
-- deployment-friendly Docker and Nginx setup
+This project is being upgraded from a local demo into a real deployment-ready product foundation.
+
+The current app includes:
+- secure environment-based configuration
+- SQLite/PostgreSQL-ready database layer
+- health endpoint
+- basic campaign flow
+- extensible structure for real Bluesky API integration
+
+## Repo privacy
+
+To make the repository private:
+1. Open the repo on GitHub
+2. Go to Settings
+3. Open "General"
+4. Change "Repository visibility" to "Private"
 
 ## Requirements
 
 - PHP 8.2+
-- Composer
-- PostgreSQL or SQLite for local development
-- cURL enabled
+- Web server with document root pointed to `public/`
+- SQLite or PostgreSQL for persistence
 
-## Quick setup
-
-1. Copy `.env.example` to `.env`
-2. Update your environment variables
-3. Create the database schema from `database/schema.sql`
-4. Install Composer dependencies:
+## Local development
 
 ```bash
-composer install
+php -S localhost:8000 -t public
 ```
 
-5. Start the app from the `public/` directory with your web server pointing to it
+Then visit:
+- `http://localhost:8000/`
+- `http://localhost:8000/health`
 
 ## Production notes
 
-- Never commit `.env` values
-- Use environment variables for secrets and credentials
-- Enable HTTPS in production
-- Use a real DB instead of JSON storage
-- Add a queue worker for background posting / promotion tasks
-
-## Local health check
-
-```bash
-curl http://localhost/health
-```
+- Keep secrets in `.env`
+- Never commit live credentials
+- Add a queue worker for publishing workflows
+- Use TLS/HTTPS in production
+- Replace mock actions with real Bluesky API calls
